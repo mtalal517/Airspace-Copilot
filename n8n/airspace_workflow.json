@@ -1,0 +1,204 @@
+{
+  "name": "Airspace Snapshot Pipeline",
+  "active": false,
+  "settings": {
+    "timezone": "UTC"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": [
+          {
+            "mode": "everyMinute",
+            "minutes": 1
+          }
+        ]
+      },
+      "id": "Cron",
+      "name": "Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://opensky-network.org/api/states/all",
+        "queryParameters": [
+          {"name": "lamin", "value": "40"},
+          {"name": "lomin", "value": "-75"},
+          {"name": "lamax", "value": "42"},
+          {"name": "lomax", "value": "-72"}
+        ],
+        "responseFormat": "json",
+        "options": {
+          "retryOnFail": true,
+          "maxAttempts": 3
+        }
+      },
+      "id": "OpenSky",
+      "name": "OpenSky Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fields = ['icao24','callsign','origin_country','time_position','last_contact','longitude','latitude','baro_altitude','on_ground','velocity','true_track','vertical_rate','sensors','geo_altitude','squawk','spi','position_source'];\nconst seen = new Map();\n(items[0].json.states || []).forEach(row => {\n  const doc = {};\n  fields.forEach((field, idx) => { doc[field] = row[idx] ?? null; });\n  const key = (doc.callsign || doc.icao24 || '').trim() || Math.random().toString();\n  if (!seen.has(key)) { seen.set(key, doc); }\n});\nreturn Array.from(seen.values()).map(state => ({ json: state }));"
+      },
+      "id": "Normalize",
+      "name": "Normalize States",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        750,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const region = 'region1';\nconst now = new Date().toISOString();\nconst snapshot = {\n  region,\n  last_updated: now,\n  bounds: { min_lat: 40, max_lat: 42, min_lon: -75, max_lon: -72 },\n  states: items.map(item => item.json)\n};\nreturn [{ json: snapshot }];"
+      },
+      "id": "Snapshot",
+      "name": "Build Snapshot",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "return items.map(item => ({ json: item.json, binary: { data: { data: Buffer.from(JSON.stringify(item.json, null, 2)).toString('base64'), mimeType: 'application/json' } } }));"
+      },
+      "id": "ToBinary",
+      "name": "Snapshot To Binary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "./data/snapshots/region1.json",
+        "binaryData": true,
+        "binaryPropertyName": "data"
+      },
+      "id": "WriteFile",
+      "name": "Write Snapshot",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "airspace/latest",
+        "options": {
+          "responseContentType": "application/json"
+        }
+      },
+      "id": "Webhook",
+      "name": "Latest Snapshot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        650
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const fs = require('fs');\nconst region = $json.query.region || 'region1';\nconst path = `./data/snapshots/${region}.json`;\nif (!fs.existsSync(path)) {\n  return [{ json: { error: `region ${region} snapshot missing`, fallback: true } }];\n}\nconst payload = JSON.parse(fs.readFileSync(path, 'utf8'));\nreturn [{ json: payload }];"
+      },
+      "id": "ReadSnapshot",
+      "name": "Read Snapshot",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        650
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "OpenSky Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenSky Request": {
+      "main": [
+        [
+          {
+            "node": "Normalize States",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize States": {
+      "main": [
+        [
+          {
+            "node": "Build Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Snapshot To Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Snapshot To Binary": {
+      "main": [
+        [
+          {
+            "node": "Write Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest Snapshot Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

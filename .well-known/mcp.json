@@ -1,0 +1,50 @@
+{
+  "name": "Airspace Copilot MCP",
+  "version": "0.1.0",
+  "description": "Exposes flights.list_region_snapshot, flights.get_by_callsign, and alerts.list_active backed by local JSON snapshots.",
+  "documentation": "https://localhost:8000/docs",
+  "tools": [
+    {
+      "name": "flights.list_region_snapshot",
+      "transport": "rest",
+      "method": "GET",
+      "url": "http://localhost:8000/flights/region/{region}",
+      "input": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string",
+            "description": "Region identifier (e.g., region1)"
+          }
+        },
+        "required": ["region"]
+      }
+    },
+    {
+      "name": "flights.get_by_callsign",
+      "transport": "rest",
+      "method": "GET",
+      "url": "http://localhost:8000/flights/callsign/{callsign}",
+      "input": {
+        "type": "object",
+        "properties": {
+          "callsign": {
+            "type": "string",
+            "description": "Flight callsign"
+          }
+        },
+        "required": ["callsign"]
+      }
+    },
+    {
+      "name": "alerts.list_active",
+      "transport": "rest",
+      "method": "GET",
+      "url": "http://localhost:8000/alerts",
+      "input": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

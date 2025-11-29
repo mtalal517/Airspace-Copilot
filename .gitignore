@@ -1,0 +1,8 @@
+# ignore env and virtual envs
+.env
+.venv/
+venv/
+env/
+
+# n8n
+n8n_data/

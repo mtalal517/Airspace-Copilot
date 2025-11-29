@@ -1,0 +1,14 @@
+{
+  "last_updated": "2024-01-01T00:00:00Z",
+  "alerts": [
+    {
+      "id": "ALERT-001",
+      "region": "region1",
+      "callsign": "TEST123",
+      "type": "ALTITUDE_DEVIATION",
+      "severity": "medium",
+      "message": "Climbing faster than expected over NY corridor.",
+      "detected_at": "2024-01-01T00:00:00Z"
+    }
+  ]
+}

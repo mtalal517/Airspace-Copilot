@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph DataPlane
+        OpenSky[(OpenSky States API)] -->|bounding boxes| n8n[n8n Workflow]
+        n8n -->|writes snapshots| Files[(data/snapshots/*.json)]
+        n8n -->|writes alerts| Alerts[(data/alerts.json)]
+    end
+
+    subgraph MCP
+        Files --> FastAPI{{MCP FastAPI Server}}
+        Alerts --> FastAPI
+        FastAPI -->|tools| MCPClients[(Agents & Frontend)]
+    end
+
+    subgraph Agents
+        OpsAgent[Ops Analyst Agent]
+        TravelerAgent[Traveler Support Agent]
+        OpsAgent <--> TravelerAgent
+        MCPClients --> OpsAgent
+        MCPClients --> TravelerAgent
+    end
+
+    subgraph UI
+        Streamlit[Streamlit Frontend]
+        Streamlit -->|Traveler Mode chat| TravelerAgent
+        Streamlit -->|Ops Mode dashboard| OpsAgent
+    end
