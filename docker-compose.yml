@@ -9,6 +9,7 @@ services:
       - N8N_BASIC_AUTH_USER=admin
       - N8N_BASIC_AUTH_PASSWORD=admin123
       - GENERIC_TIMEZONE=Europe/Berlin
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs
     volumes:
       - ./n8n_data:/home/node/.n8n
       - ./data:/data

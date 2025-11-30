@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
 
+import httpx
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -20,16 +22,43 @@ from agents.mcp_client import MCPClient
 from agents.ops_agent import OpsAnalystAgent
 from agents.crew_runner import run_crewai
 
+N8N_WEBHOOK_BASE = os.getenv("N8N_WEBHOOK_BASE", "http://localhost:5678/webhook-test/airspace")
+
 st.set_page_config(page_title="Airspace Copilot", layout="wide")
 
 client = MCPClient()
 ops_helper = OpsAnalystAgent(client)
 
 
+def _trigger_latest_snapshot(region: str) -> str:
+    url = f"{N8N_WEBHOOK_BASE.rstrip('/')}/latest"
+    resp = httpx.get(url, timeout=15)
+    resp.raise_for_status()
+    return resp.json().get("last_updated", "recent")
+
+
+def _rerun_app() -> None:
+    rerun = getattr(st, "rerun", None)
+    if callable(rerun):
+        rerun()
+        return
+    legacy = getattr(st, "experimental_rerun", None)
+    if callable(legacy):
+        legacy()
+
+
 def render_ops_mode() -> None:
     st.header("Operations Mode")
     regions = client.list_regions().get("regions", []) or ["region1"]
     region = st.selectbox("Region", regions)
+    if st.button("Fetch Latest Snapshot", type="primary"):
+        try:
+            timestamp = _trigger_latest_snapshot(region)
+            st.success(f"Snapshot refreshed ({timestamp}). Reloading dashboard...")
+            _rerun_app()
+        except Exception as exc:  # pragma: no cover - UI fallback
+            st.error(f"Failed to trigger snapshot: {exc}")
+
     st.session_state["ops_region"] = region
     try:
         report = ops_helper.analyze_region(region)

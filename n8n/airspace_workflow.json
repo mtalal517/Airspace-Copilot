@@ -1,6 +1,6 @@
 {
   "name": "Airspace Snapshot Pipeline",
-  "active": false,
+  "active": true,
   "settings": {
     "timezone": "UTC"
   },
@@ -50,7 +50,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const fields = ['icao24','callsign','origin_country','time_position','last_contact','longitude','latitude','baro_altitude','on_ground','velocity','true_track','vertical_rate','sensors','geo_altitude','squawk','spi','position_source'];\nconst seen = new Map();\n(items[0].json.states || []).forEach(row => {\n  const doc = {};\n  fields.forEach((field, idx) => { doc[field] = row[idx] ?? null; });\n  const key = (doc.callsign || doc.icao24 || '').trim() || Math.random().toString();\n  if (!seen.has(key)) { seen.set(key, doc); }\n});\nreturn Array.from(seen.values()).map(state => ({ json: state }));"
+        "functionCode": "const fieldMap = [\n  ['icao24', 0],\n  ['callsign', 1],\n  ['origin_country', 2],\n  ['time_position', 3],\n  ['last_contact', 4],\n  ['longitude', 5],\n  ['latitude', 6],\n  ['baro_altitude', 7],\n  ['on_ground', 8],\n  ['velocity', 9],\n  ['true_track', 10],\n  ['vertical_rate', 11],\n  ['sensors', 12],\n  ['geo_altitude', 13],\n  ['squawk', 14],\n  ['spi', 15],\n  ['position_source', 16],\n  ['category', 17]\n];\nconst seen = new Map();\n(items[0].json.states || []).forEach(row => {\n  const doc = {};\n  fieldMap.forEach(([field, idx]) => { doc[field] = row[idx] ?? null; });\n  doc.heading = doc.true_track;\n  doc.altitude = doc.geo_altitude ?? doc.baro_altitude ?? null;\n  if (typeof doc.callsign === 'string') {\n    doc.callsign = doc.callsign.trim();\n  }\n  const key = doc.callsign || doc.icao24 || Math.random().toString();\n  if (!seen.has(key)) {\n    seen.set(key, doc);\n  }\n});\nreturn Array.from(seen.values()).map(state => ({ json: state }));"
       },
       "id": "Normalize",
       "name": "Normalize States",
@@ -104,8 +104,49 @@
     },
     {
       "parameters": {
+        "functionCode": "const snapshot = items[0].json || {};\nconst region = snapshot.region || 'region1';\nconst detectionTime = snapshot.last_updated || new Date().toISOString();\nconst states = snapshot.states || [];\nconst alerts = [];\nconst normalizeCallsign = (value) => {\n  if (!value) { return 'UNKNOWN'; }\n  const trimmed = String(value).trim();\n  return trimmed || 'UNKNOWN';\n};\nconst slugify = (value) => normalizeCallsign(value).replace(/[^A-Z0-9]/gi, '').slice(0, 6) || 'UNK';\nconst pushAlert = (state, type, severity, message, details = {}) => {\n  const callsign = normalizeCallsign(state.callsign || state.icao24);\n  const idSuffix = String(alerts.length + 1).padStart(2, '0');\n  alerts.push({\n    id: `ALERT-${slugify(callsign)}-${type}-${idSuffix}`.toUpperCase(),\n    region,\n    callsign,\n    icao24: state.icao24 || null,\n    type,\n    severity,\n    message,\n    detected_at: detectionTime,\n    telemetry: {\n      altitude: state.geo_altitude ?? state.baro_altitude ?? null,\n      velocity: state.velocity ?? null,\n      on_ground: state.on_ground ?? null\n    },\n    details\n  });\n};\nstates.forEach(state => {\n  const velocity = typeof state.velocity === 'number' ? state.velocity : null;\n  if (velocity !== null && velocity > 280) {\n    pushAlert(state, 'HIGH_VELOCITY', 'high', `Velocity ${velocity.toFixed(0)} m/s exceeds threshold.`, { velocity });\n  }\n  const baro = typeof state.baro_altitude === 'number' ? state.baro_altitude : null;\n  if (baro !== null && baro < 300 && state.on_ground === false) {\n    pushAlert(state, 'LOW_ALTITUDE', 'medium', `Altitude ${Math.round(baro)} m while airborne.`, { altitude: baro });\n  }\n  const hasLatency = typeof state.last_contact === 'number' && typeof state.time_position === 'number';\n  if (hasLatency) {\n    const latency = state.last_contact - state.time_position;\n    if (latency > 45) {\n      pushAlert(state, 'STALE_TELEMETRY', 'medium', `Telemetry delayed by ${Math.round(latency)}s.`, { latency });\n    }\n  }\n  if (state.latitude == null || state.longitude == null) {\n    pushAlert(state, 'MISSING_POSITION', 'low', 'Missing latest latitude/longitude fix.');\n  }\n});\nreturn [{ json: { last_updated: detectionTime, alerts } }];"
+      },
+      "id": "Alerts",
+      "name": "Detect Alerts",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1000,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "return items.map(item => ({ json: item.json, binary: { data: { data: Buffer.from(JSON.stringify(item.json, null, 2)).toString('base64'), mimeType: 'application/json' } } }));"
+      },
+      "id": "AlertsBinary",
+      "name": "Alerts To Binary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "fileName": "./data/alerts.json",
+        "binaryData": true,
+        "binaryPropertyName": "data"
+      },
+      "id": "WriteAlerts",
+      "name": "Write Alerts",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1500,
+        520
+      ]
+    },
+    {
+      "parameters": {
         "httpMethod": "GET",
-        "path": "airspace/latest",
+        "path": "latest-region/:region",
         "options": {
           "responseContentType": "application/json"
         }
@@ -121,7 +162,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const fs = require('fs');\nconst region = $json.query.region || 'region1';\nconst path = `./data/snapshots/${region}.json`;\nif (!fs.existsSync(path)) {\n  return [{ json: { error: `region ${region} snapshot missing`, fallback: true } }];\n}\nconst payload = JSON.parse(fs.readFileSync(path, 'utf8'));\nreturn [{ json: payload }];"
+        "functionCode": "const fs = require('fs');\nconst params = $json.params || {};\nconst region = (params.region || $json.query.region || 'region1').toLowerCase();\nconst path = `./data/snapshots/${region}.json`;\nif (!fs.existsSync(path)) {\n  return [{ json: { error: `region ${region} snapshot missing`, fallback: true } }];\n}\nconst payload = JSON.parse(fs.readFileSync(path, 'utf8'));\nreturn [{ json: payload }];"
       },
       "id": "ReadSnapshot",
       "name": "Read Snapshot",
@@ -174,6 +215,11 @@
             "node": "Snapshot To Binary",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Detect Alerts",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -183,6 +229,28 @@
         [
           {
             "node": "Write Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Alerts": {
+      "main": [
+        [
+          {
+            "node": "Alerts To Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alerts To Binary": {
+      "main": [
+        [
+          {
+            "node": "Write Alerts",
             "type": "main",
             "index": 0
           }

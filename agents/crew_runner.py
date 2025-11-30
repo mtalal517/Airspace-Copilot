@@ -5,16 +5,21 @@ import argparse
 import json
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, TypedDict
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 from langgraph.graph import END, StateGraph
+from dotenv import load_dotenv
 
 from .mcp_client import MCPClient
 from .ops_agent import OpsAnalystAgent
 from .traveler_agent import TravelerSupportAgent
+
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
 client = MCPClient()
 ops_helper = OpsAnalystAgent(client)
@@ -125,7 +130,7 @@ def create_ops_node(llm: ChatGroq):
                 "region": region,
                 "question": state.get("question", ""),
                 "analysis_json": json.dumps(compact, ensure_ascii=False),
-                "alerts_json": json.dumps({"alerts": compact.get("alerts", [])}, ensure_ascii=False),
+                "alerts_json": json.dumps({"alerts": alerts.get("alerts", [])}, ensure_ascii=False),
             }
         )
         next_state = dict(state)
